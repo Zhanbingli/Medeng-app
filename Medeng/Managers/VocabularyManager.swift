@@ -12,11 +12,30 @@ import Combine
 class VocabularyManager: ObservableObject {
     static let shared = VocabularyManager()
 
-    @Published var allTerms: [MedicalTerm] = []
-    @Published var progressMap: [UUID: StudyProgress] = [:]
+    @Published var allTerms: [MedicalTerm] = [] {
+        didSet {
+            // Rebuild indices when terms change
+            buildIndices()
+        }
+    }
+    @Published var progressMap: [UUID: StudyProgress] = [:] {
+        didSet {
+            // Invalidate statistics cache when progress changes
+            invalidateStatistics()
+        }
+    }
     @Published var searchText: String = ""
     @Published var selectedCategory: MedicalCategory?
     @Published var selectedDifficulty: DifficultyLevel?
+
+    // Performance optimization: indexed lookups
+    private var termsByCategory: [MedicalCategory: [MedicalTerm]] = [:]
+    private var termsByDifficulty: [DifficultyLevel: [MedicalTerm]] = [:]
+    private var termsByID: [UUID: MedicalTerm] = [:]
+
+    // Cached statistics
+    private var cachedStatistics: (total: Int, studied: Int, mastered: Int, accuracy: Double)?
+    private var statisticsInvalidated = true
 
     private let termsKey = "medical_terms"
     private let progressKey = "study_progress"
@@ -26,28 +45,45 @@ class VocabularyManager: ObservableObject {
         if allTerms.isEmpty {
             loadSampleData()
         }
+        buildIndices()
     }
 
-    // 过滤后的术语列表
-    var filteredTerms: [MedicalTerm] {
-        var terms = allTerms
+    /// Build indices for fast lookups
+    private func buildIndices() {
+        termsByCategory = Dictionary(grouping: allTerms) { $0.category }
+        termsByDifficulty = Dictionary(grouping: allTerms) { $0.difficulty }
+        termsByID = Dictionary(uniqueKeysWithValues: allTerms.map { ($0.id, $0) })
+    }
 
-        // 按类别过滤
+    /// Fast term lookup by ID
+    func getTerm(by id: UUID) -> MedicalTerm? {
+        return termsByID[id]
+    }
+
+    // 过滤后的术语列表 (优化版本)
+    var filteredTerms: [MedicalTerm] {
+        // Start with indexed lookup if possible
+        var terms: [MedicalTerm]
+
+        // Use index for category filtering (O(1) lookup)
         if let category = selectedCategory {
-            terms = terms.filter { $0.category == category }
+            terms = termsByCategory[category] ?? []
+        } else {
+            terms = allTerms
         }
 
-        // 按难度过滤
+        // Apply difficulty filter (on smaller set if category was filtered)
         if let difficulty = selectedDifficulty {
             terms = terms.filter { $0.difficulty == difficulty }
         }
 
-        // 按搜索文本过滤
+        // Apply search filter last (on smallest possible set)
         if !searchText.isEmpty {
+            let lowercased = searchText.lowercased()
             terms = terms.filter {
-                $0.term.localizedCaseInsensitiveContains(searchText) ||
-                $0.chineseTranslation.localizedCaseInsensitiveContains(searchText) ||
-                $0.definition.localizedCaseInsensitiveContains(searchText)
+                $0.term.lowercased().contains(lowercased) ||
+                $0.chineseTranslation.contains(lowercased) ||
+                $0.definition.lowercased().contains(lowercased)
             }
         }
 
@@ -96,8 +132,14 @@ class VocabularyManager: ObservableObject {
         saveData()
     }
 
-    // 获取学习统计
+    // 获取学习统计 (优化版本 - 使用缓存)
     func getStudyStatistics() -> (total: Int, studied: Int, mastered: Int, accuracy: Double) {
+        // Return cached result if available
+        if !statisticsInvalidated, let cached = cachedStatistics {
+            return cached
+        }
+
+        // Calculate statistics
         let total = allTerms.count
         let studied = progressMap.values.filter { $0.reviewCount > 0 }.count
         let mastered = progressMap.values.filter { $0.masteryLevel >= 4 }.count
@@ -106,7 +148,17 @@ class VocabularyManager: ObservableObject {
         let totalCorrect = progressMap.values.reduce(0) { $0 + $1.correctCount }
         let accuracy = totalReviews > 0 ? Double(totalCorrect) / Double(totalReviews) : 0
 
-        return (total, studied, mastered, accuracy)
+        // Cache the result
+        let result = (total, studied, mastered, accuracy)
+        cachedStatistics = result
+        statisticsInvalidated = false
+
+        return result
+    }
+
+    /// Invalidate statistics cache
+    private func invalidateStatistics() {
+        statisticsInvalidated = true
     }
 
     // 保存数据到UserDefaults

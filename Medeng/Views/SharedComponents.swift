@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 // 类别图标
 struct CategoryIcon: View {
@@ -130,5 +131,47 @@ struct MasteryBadge: View {
                     .foregroundColor(index < level ? color : .gray.opacity(0.3))
             }
         }
+    }
+}
+
+// 语音朗读按钮
+struct PronunciationButton: View {
+    let term: MedicalTerm
+    @StateObject private var pronunciationService = PronunciationService.shared
+
+    var body: some View {
+        Button(action: {
+            pronunciationService.speakTerm(term)
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: pronunciationService.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2")
+                    .font(.system(size: 18))
+                Text("Pronounce")
+                    .font(.subheadline)
+            }
+            .foregroundColor(.blue)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+        }
+        .disabled(pronunciationService.isSpeaking)
+    }
+}
+
+// 小型语音按钮（仅图标）
+struct SmallPronunciationButton: View {
+    let term: MedicalTerm
+    @StateObject private var pronunciationService = PronunciationService.shared
+
+    var body: some View {
+        Button(action: {
+            pronunciationService.speakTerm(term)
+        }) {
+            Image(systemName: pronunciationService.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.circle.fill")
+                .font(.title3)
+                .foregroundColor(pronunciationService.isSpeaking ? .blue : .gray)
+        }
+        .disabled(pronunciationService.isSpeaking)
     }
 }
