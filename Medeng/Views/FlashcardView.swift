@@ -11,13 +11,11 @@ struct FlashcardView: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
     @State private var currentIndex = 0
     @State private var showingOptions = false
+    @State private var termsToStudy: [MedicalTerm] = []
 
-    var termsToStudy: [MedicalTerm] {
+    private func updateTermsToStudy() {
         let dueTerms = vocabularyManager.termsToReview
-        if !dueTerms.isEmpty {
-            return dueTerms
-        }
-        return vocabularyManager.allTerms
+        termsToStudy = dueTerms.isEmpty ? vocabularyManager.allTerms : dueTerms
     }
 
     var body: some View {
@@ -109,6 +107,9 @@ struct FlashcardView: View {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
+            }
+            .onAppear {
+                updateTermsToStudy()
             }
         }
     }
@@ -212,23 +213,32 @@ struct SwipeableFlashcard: View {
     @State private var offset = CGSize.zero
     @State private var rotation: Double = 0
 
+    @State private var cachedProgress: StudyProgress?
+
     var progress: StudyProgress {
-        vocabularyManager.getProgress(for: term)
+        if let cached = cachedProgress {
+            return cached
+        }
+        let p = vocabularyManager.getProgress(for: term)
+        cachedProgress = p
+        return p
     }
 
-    // 计算卡片缩放和偏移（堆叠效果）
+    // 计算卡片缩放和偏移（堆叠效果）- 优化为常量
+    private let baseScale: CGFloat = 1.0
+    private let scaleDecrement: CGFloat = 0.05
+    private let verticalOffsetStep: CGFloat = -10
+
     var scale: CGFloat {
-        let baseScale: CGFloat = 1.0
-        let scaleDecrement: CGFloat = 0.05
-        return baseScale - (CGFloat(index) * scaleDecrement)
+        baseScale - (CGFloat(index) * scaleDecrement)
     }
 
     var verticalOffset: CGFloat {
-        CGFloat(index) * -10
+        CGFloat(index) * verticalOffsetStep
     }
 
     var isDragging: Bool {
-        abs(offset.width) > 0 || abs(offset.height) > 0
+        abs(offset.width) > 5 || abs(offset.height) > 5  // Add threshold to avoid micro-movements
     }
 
     var body: some View {

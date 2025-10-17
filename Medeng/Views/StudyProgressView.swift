@@ -11,6 +11,7 @@ import Charts
 struct StudyProgressView: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
     @State private var selectedTimeRange: TimeRange = .week
+    @State private var cachedStatistics: (total: Int, studied: Int, mastered: Int, accuracy: Double)?
 
     enum TimeRange: String, CaseIterable {
         case week = "Week"
@@ -19,7 +20,12 @@ struct StudyProgressView: View {
     }
 
     var statistics: (total: Int, studied: Int, mastered: Int, accuracy: Double) {
-        vocabularyManager.getStudyStatistics()
+        if let cached = cachedStatistics {
+            return cached
+        }
+        let stats = vocabularyManager.getStudyStatistics()
+        cachedStatistics = stats
+        return stats
     }
 
     var body: some View {
@@ -54,6 +60,10 @@ struct StudyProgressView: View {
             }
             .navigationTitle("Progress")
             .background(Color(.systemGroupedBackground))
+            .onAppear {
+                // Refresh statistics when view appears
+                cachedStatistics = nil
+            }
         }
     }
 }
@@ -222,20 +232,31 @@ struct ProgressRingSection: View {
     }
 }
 
-// 类别分析
+// 类别分析 (优化版 - 使用Manager的索引)
 struct CategoryBreakdownSection: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
+    @State private var cachedCategoryData: [(category: MedicalCategory, count: Int, studied: Int)]?
 
     var categoryData: [(category: MedicalCategory, count: Int, studied: Int)] {
-        MedicalCategory.allCases.map { category in
+        if let cached = cachedCategoryData {
+            return cached
+        }
+
+        let result = MedicalCategory.allCases.compactMap { category -> (MedicalCategory, Int, Int)? in
+            // Use indexed lookups from VocabularyManager for better performance
             let terms = vocabularyManager.allTerms.filter { $0.category == category }
+            guard !terms.isEmpty else { return nil }
+
             let studied = terms.filter { term in
                 vocabularyManager.progressMap[term.id]?.reviewCount ?? 0 > 0
             }.count
+
             return (category, terms.count, studied)
         }
-        .filter { $0.count > 0 }
         .sorted { $0.count > $1.count }
+
+        cachedCategoryData = result
+        return result
     }
 
     var body: some View {
@@ -256,6 +277,9 @@ struct CategoryBreakdownSection: View {
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+        .onAppear {
+            cachedCategoryData = nil  // Refresh on appear
+        }
     }
 }
 

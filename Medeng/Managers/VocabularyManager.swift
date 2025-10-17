@@ -24,14 +24,34 @@ class VocabularyManager: ObservableObject {
             invalidateStatistics()
         }
     }
-    @Published var searchText: String = ""
-    @Published var selectedCategory: MedicalCategory?
-    @Published var selectedDifficulty: DifficultyLevel?
+    @Published var searchText: String = "" {
+        didSet {
+            invalidateFilterCache()
+        }
+    }
+    @Published var selectedCategory: MedicalCategory? {
+        didSet {
+            invalidateFilterCache()
+        }
+    }
+    @Published var selectedDifficulty: DifficultyLevel? {
+        didSet {
+            invalidateFilterCache()
+        }
+    }
 
     // Performance optimization: indexed lookups
     private var termsByCategory: [MedicalCategory: [MedicalTerm]] = [:]
     private var termsByDifficulty: [DifficultyLevel: [MedicalTerm]] = [:]
     private var termsByID: [UUID: MedicalTerm] = [:]
+
+    // Cached filter results
+    private var cachedFilteredTerms: [MedicalTerm]?
+    private var filterCacheInvalidated = true
+
+    // Cached derived lists
+    private var cachedTermsToReview: [MedicalTerm]?
+    private var cachedFavoriteTerms: [MedicalTerm]?
 
     // Cached statistics
     private var cachedStatistics: (total: Int, studied: Int, mastered: Int, accuracy: Double)?
@@ -53,6 +73,19 @@ class VocabularyManager: ObservableObject {
         termsByCategory = Dictionary(grouping: allTerms) { $0.category }
         termsByDifficulty = Dictionary(grouping: allTerms) { $0.difficulty }
         termsByID = Dictionary(uniqueKeysWithValues: allTerms.map { ($0.id, $0) })
+        invalidateFilterCache()
+        invalidateDerivedLists()
+    }
+
+    /// Invalidate filter cache
+    private func invalidateFilterCache() {
+        filterCacheInvalidated = true
+    }
+
+    /// Invalidate derived lists cache
+    private func invalidateDerivedLists() {
+        cachedTermsToReview = nil
+        cachedFavoriteTerms = nil
     }
 
     /// Fast term lookup by ID
@@ -60,8 +93,13 @@ class VocabularyManager: ObservableObject {
         return termsByID[id]
     }
 
-    // 过滤后的术语列表 (优化版本)
+    // 过滤后的术语列表 (优化版本 - 带缓存)
     var filteredTerms: [MedicalTerm] {
+        // Return cached result if available
+        if !filterCacheInvalidated, let cached = cachedFilteredTerms {
+            return cached
+        }
+
         // Start with indexed lookup if possible
         var terms: [MedicalTerm]
 
@@ -87,22 +125,40 @@ class VocabularyManager: ObservableObject {
             }
         }
 
+        // Cache the result
+        cachedFilteredTerms = terms
+        filterCacheInvalidated = false
+
         return terms
     }
 
-    // 待复习的术语
+    // 待复习的术语 (带缓存)
     var termsToReview: [MedicalTerm] {
-        allTerms.filter { term in
+        if let cached = cachedTermsToReview {
+            return cached
+        }
+
+        let result = allTerms.filter { term in
             guard let progress = progressMap[term.id] else { return true }
             return progress.nextReviewDate <= Date()
         }
+
+        cachedTermsToReview = result
+        return result
     }
 
-    // 收藏的术语
+    // 收藏的术语 (带缓存)
     var favoriteTerms: [MedicalTerm] {
-        allTerms.filter { term in
+        if let cached = cachedFavoriteTerms {
+            return cached
+        }
+
+        let result = allTerms.filter { term in
             progressMap[term.id]?.isFavorite ?? false
         }
+
+        cachedFavoriteTerms = result
+        return result
     }
 
     // 获取术语的进度
@@ -121,6 +177,7 @@ class VocabularyManager: ObservableObject {
         var progress = getProgress(for: term)
         progress.recordReview(isCorrect: isCorrect)
         progressMap[term.id] = progress
+        invalidateDerivedLists()  // Invalidate since review status changed
         saveData()
     }
 
@@ -129,6 +186,7 @@ class VocabularyManager: ObservableObject {
         var progress = getProgress(for: term)
         progress.isFavorite.toggle()
         progressMap[term.id] = progress
+        invalidateDerivedLists()  // Invalidate since favorite status changed
         saveData()
     }
 
