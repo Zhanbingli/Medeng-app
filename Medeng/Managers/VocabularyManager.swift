@@ -9,6 +9,7 @@ import Foundation
 import Combine
 
 // 词汇数据管理器
+@MainActor
 class VocabularyManager: ObservableObject {
     static let shared = VocabularyManager()
 
@@ -51,6 +52,8 @@ class VocabularyManager: ObservableObject {
 
     // Cached derived lists
     private var cachedTermsToReview: [MedicalTerm]?
+    private var termsToReviewCacheDate: Date?
+    private let reviewCacheTTL: TimeInterval = 300 // 5 minutes to avoid stale due reminders
     private var cachedFavoriteTerms: [MedicalTerm]?
 
     // Cached statistics
@@ -59,6 +62,7 @@ class VocabularyManager: ObservableObject {
 
     private let termsKey = "medical_terms"
     private let progressKey = "study_progress"
+    private let persistenceQueue = DispatchQueue(label: "com.medeng.vocabulary.persistence", qos: .utility)
 
     private init() {
         loadData()
@@ -85,6 +89,7 @@ class VocabularyManager: ObservableObject {
     /// Invalidate derived lists cache
     private func invalidateDerivedLists() {
         cachedTermsToReview = nil
+        termsToReviewCacheDate = nil
         cachedFavoriteTerms = nil
     }
 
@@ -134,7 +139,10 @@ class VocabularyManager: ObservableObject {
 
     // 待复习的术语 (带缓存)
     var termsToReview: [MedicalTerm] {
-        if let cached = cachedTermsToReview {
+        // Invalidate cache when it is too old or crosses day boundary
+        if let cached = cachedTermsToReview,
+           let cacheDate = termsToReviewCacheDate,
+           !hasReviewCacheExpired(since: cacheDate) {
             return cached
         }
 
@@ -144,7 +152,16 @@ class VocabularyManager: ObservableObject {
         }
 
         cachedTermsToReview = result
+        termsToReviewCacheDate = Date()
         return result
+    }
+
+    private func hasReviewCacheExpired(since date: Date) -> Bool {
+        if Date().timeIntervalSince(date) > reviewCacheTTL {
+            return true
+        }
+        // If day changed, expire to catch newly-due cards after midnight
+        return !Calendar.current.isDate(date, inSameDayAs: Date())
     }
 
     // 收藏的术语 (带缓存)
@@ -221,12 +238,18 @@ class VocabularyManager: ObservableObject {
 
     // 保存数据到UserDefaults
     private func saveData() {
-        if let termsData = try? JSONEncoder().encode(allTerms) {
-            UserDefaults.standard.set(termsData, forKey: termsKey)
-        }
+        // Snapshot on main-actor, persist off-main to avoid UI stalls
+        let termsSnapshot = allTerms
+        let progressSnapshot = progressMap
 
-        if let progressData = try? JSONEncoder().encode(progressMap) {
-            UserDefaults.standard.set(progressData, forKey: progressKey)
+        persistenceQueue.async { [termsKey, progressKey] in
+            if let termsData = try? JSONEncoder().encode(termsSnapshot) {
+                UserDefaults.standard.set(termsData, forKey: termsKey)
+            }
+
+            if let progressData = try? JSONEncoder().encode(progressSnapshot) {
+                UserDefaults.standard.set(progressData, forKey: progressKey)
+            }
         }
     }
 

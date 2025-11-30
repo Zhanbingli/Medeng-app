@@ -315,6 +315,15 @@ struct AIInsightsView: View {
         errorMessage = nil
 
         Task {
+            // 提前检查配置，避免无谓请求
+            guard aiService.isConfigured else {
+                await MainActor.run {
+                    errorMessage = AIError.notConfigured.localizedDescription
+                    isAnalyzing = false
+                }
+                return
+            }
+
             do {
                 let result = try await aiService.analyzeTerm(term)
                 await MainActor.run {

@@ -12,10 +12,37 @@ struct FlashcardView: View {
     @State private var currentIndex = 0
     @State private var showingOptions = false
     @State private var termsToStudy: [MedicalTerm] = []
+    @State private var studySource: StudySource = .auto
 
-    private func updateTermsToStudy() {
+    enum StudySource {
+        case auto        // Due terms if available, otherwise all
+        case dueOnly     // Only due terms
+        case all         // All terms
+    }
+
+    private func refreshTermsToStudy(resetIndex: Bool) {
         let dueTerms = vocabularyManager.termsToReview
-        termsToStudy = dueTerms.isEmpty ? vocabularyManager.allTerms : dueTerms
+        let nextList: [MedicalTerm]
+
+        switch studySource {
+        case .auto:
+            nextList = dueTerms.isEmpty ? vocabularyManager.allTerms : dueTerms
+        case .dueOnly:
+            nextList = dueTerms
+        case .all:
+            nextList = vocabularyManager.allTerms
+        }
+
+        // Only update when the data set actually changes
+        if nextList.map(\.id) != termsToStudy.map(\.id) {
+            termsToStudy = nextList
+
+            if resetIndex {
+                currentIndex = 0
+            } else if currentIndex >= nextList.count {
+                currentIndex = max(0, nextList.count - 1)
+            }
+        }
     }
 
     var body: some View {
@@ -106,10 +133,36 @@ struct FlashcardView: View {
                     Button(action: { showingOptions = true }) {
                         Image(systemName: "ellipsis.circle")
                     }
+                    .confirmationDialog("Practice Options", isPresented: $showingOptions) {
+                        Button("Auto (Due → All)") {
+                            studySource = .auto
+                            refreshTermsToStudy(resetIndex: true)
+                        }
+                        Button("Due Terms Only") {
+                            studySource = .dueOnly
+                            refreshTermsToStudy(resetIndex: true)
+                        }
+                        Button("All Terms") {
+                            studySource = .all
+                            refreshTermsToStudy(resetIndex: true)
+                        }
+                        Button("Restart Session", role: .destructive) {
+                            refreshTermsToStudy(resetIndex: true)
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    }
                 }
             }
             .onAppear {
-                updateTermsToStudy()
+                refreshTermsToStudy(resetIndex: true)
+            }
+            .onReceive(vocabularyManager.$progressMap) { _ in
+                // Keep deck in sync with newly reviewed items
+                refreshTermsToStudy(resetIndex: false)
+            }
+            .onReceive(vocabularyManager.$allTerms) { _ in
+                // New terms should restart the session ordering
+                refreshTermsToStudy(resetIndex: true)
             }
         }
     }
@@ -361,55 +414,73 @@ struct FlashcardContent: View {
             VStack(spacing: 20) {
                 if !isShowingAnswer {
                     // 问题面
-                    Spacer().frame(height: 40)
+                    VStack(spacing: 16) {
+                        HStack {
+                            CategoryIcon(category: term.category)
+                                .frame(width: 56, height: 56)
 
-                    CategoryIcon(category: term.category)
-                        .frame(width: 60, height: 60)
+                            DifficultyBadge(difficulty: term.difficulty)
+                                .padding(.leading, 4)
 
-                    Text(term.term)
-                        .font(.system(size: 36, weight: .bold))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                        .minimumScaleFactor(0.7)
+                            Spacer()
 
-                    Text(term.pronunciation)
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-                        .italic()
+                            SmallPronunciationButton(term: term)
+                        }
 
-                    Spacer()
+                        Text(term.term)
+                            .font(.system(size: 36, weight: .bold))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(3)
+                            .minimumScaleFactor(0.7)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "hand.tap.fill")
-                            .font(.caption)
-                        Text("Tap to reveal")
-                            .font(.caption)
+                        Text(term.pronunciation)
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                            .italic()
+
+                        Spacer().frame(height: 8)
+
+                        HStack(spacing: 10) {
+                            Label("Tap to reveal", systemImage: "hand.tap.fill")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            if progress.masteryLevel > 0 {
+                                MasteryBadge(level: progress.masteryLevel)
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(20)
                     }
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 16)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(20)
 
                 } else {
                     // 答案面
                     VStack(alignment: .leading, spacing: 16) {
                         // 标题
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(term.term)
-                                .font(.title)
-                                .bold()
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(term.term)
+                                        .font(.title)
+                                        .bold()
 
-                            Text(term.chineseTranslation)
-                                .font(.title2)
-                                .foregroundColor(.blue)
-
-                            HStack {
-                                DifficultyBadge(difficulty: term.difficulty)
-
-                                if progress.reviewCount > 0 {
-                                    MasteryBadge(level: progress.masteryLevel)
+                                    Text(term.chineseTranslation)
+                                        .font(.title2)
+                                        .foregroundColor(.blue)
                                 }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 8) {
+                                    DifficultyBadge(difficulty: term.difficulty)
+                                    SmallPronunciationButton(term: term)
+                                }
+                            }
+
+                            if progress.reviewCount > 0 {
+                                MasteryBadge(level: progress.masteryLevel)
                             }
                         }
 

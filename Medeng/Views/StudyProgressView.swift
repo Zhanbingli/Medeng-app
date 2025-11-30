@@ -11,7 +11,7 @@ import Charts
 struct StudyProgressView: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
     @State private var selectedTimeRange: TimeRange = .week
-    @State private var cachedStatistics: (total: Int, studied: Int, mastered: Int, accuracy: Double)?
+    @State private var statsRefreshToken = UUID()
 
     enum TimeRange: String, CaseIterable {
         case week = "Week"
@@ -20,12 +20,12 @@ struct StudyProgressView: View {
     }
 
     var statistics: (total: Int, studied: Int, mastered: Int, accuracy: Double) {
-        if let cached = cachedStatistics {
-            return cached
-        }
-        let stats = vocabularyManager.getStudyStatistics()
-        cachedStatistics = stats
-        return stats
+        _ = statsRefreshToken
+        return vocabularyManager.getStudyStatistics()
+    }
+    
+    var dueCount: Int {
+        vocabularyManager.termsToReview.count
     }
 
     var body: some View {
@@ -33,7 +33,7 @@ struct StudyProgressView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // 总体统计卡片
-                    OverallStatsCard(statistics: statistics)
+                    OverallStatsCard(statistics: statistics, dueCount: dueCount)
                         .padding(.horizontal)
 
                     // 学习进度环形图
@@ -61,8 +61,13 @@ struct StudyProgressView: View {
             .navigationTitle("Progress")
             .background(Color(.systemGroupedBackground))
             .onAppear {
-                // Refresh statistics when view appears
-                cachedStatistics = nil
+                statsRefreshToken = UUID()
+            }
+            .onReceive(vocabularyManager.$progressMap) { _ in
+                statsRefreshToken = UUID()
+            }
+            .onReceive(vocabularyManager.$allTerms) { _ in
+                statsRefreshToken = UUID()
             }
         }
     }
@@ -71,14 +76,28 @@ struct StudyProgressView: View {
 // 总体统计卡片
 struct OverallStatsCard: View {
     let statistics: (total: Int, studied: Int, mastered: Int, accuracy: Double)
+    let dueCount: Int
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Overall Statistics")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Overall Statistics")
+                        .font(.headline)
+                    Text("Keep an eye on progress and due reviews")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                if dueCount > 0 {
+                    MetricPill(title: "Due Today", value: "\(dueCount)", color: .orange, systemImage: "bell.fill")
+                } else {
+                    MetricPill(title: "Up to date", value: "✓", color: .green, systemImage: "checkmark.circle.fill")
+                }
+            }
 
-            HStack(spacing: 12) {
+            let columns = [GridItem(.flexible()), GridItem(.flexible())]
+            LazyVGrid(columns: columns, spacing: 12) {
                 StatCard(
                     title: "Total",
                     value: "\(statistics.total)",
@@ -139,6 +158,38 @@ struct StatCard: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(color.opacity(0.1))
+        .cornerRadius(12)
+    }
+}
+
+// 顶部小型指标胶囊
+struct MetricPill: View {
+    let title: String
+    let value: String
+    let color: Color
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundColor(.white)
+                .font(.caption)
+                .padding(6)
+                .background(color)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.subheadline)
+                    .bold()
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(color.opacity(0.12))
         .cornerRadius(12)
     }
 }
@@ -242,7 +293,7 @@ struct CategoryBreakdownSection: View {
             return cached
         }
 
-        let result = MedicalCategory.allCases.compactMap { category -> (MedicalCategory, Int, Int)? in
+        let result: [(category: MedicalCategory, count: Int, studied: Int)] = MedicalCategory.allCases.compactMap { category -> (category: MedicalCategory, count: Int, studied: Int)? in
             // Use indexed lookups from VocabularyManager for better performance
             let terms = vocabularyManager.allTerms.filter { $0.category == category }
             guard !terms.isEmpty else { return nil }
@@ -251,9 +302,9 @@ struct CategoryBreakdownSection: View {
                 vocabularyManager.progressMap[term.id]?.reviewCount ?? 0 > 0
             }.count
 
-            return (category, terms.count, studied)
+            return (category: category, count: terms.count, studied: studied)
         }
-        .sorted { $0.count > $1.count }
+        .sorted { lhs, rhs in lhs.count > rhs.count }
 
         cachedCategoryData = result
         return result

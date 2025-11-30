@@ -7,39 +7,103 @@
 
 import Foundation
 
+@MainActor
 class MedicalDictionaryService: ObservableObject {
     static let shared = MedicalDictionaryService()
 
     @Published var isLoading = false
     @Published var loadingProgress: Double = 0
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
+    private let umlsBaseURL = "https://uts-ws.nlm.nih.gov/rest"
+    private let umlsKeyDefaultsKey = "umls_api_key"
 
     // 搜索医学术语（通过UMLS API）
     func searchMedicalTerm(query: String) async throws -> [MedicalTermSearchResult] {
-        // UMLS (Unified Medical Language System) - 美国国家医学图书馆
-        let apiKey = "YOUR_UMLS_API_KEY" // 用户需要申请
+        guard let apiKey = umlsAPIKey() else {
+            throw DictionaryError.missingAPIKey
+        }
+
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let urlString = "https://uts-ws.nlm.nih.gov/rest/search/current?string=\(encodedQuery)&apiKey=\(apiKey)"
+        let urlString = "\(umlsBaseURL)/search/current?string=\(encodedQuery)&apiKey=\(apiKey)"
 
         guard let url = URL(string: urlString) else {
             throw DictionaryError.invalidURL
         }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await session.data(from: url)
+        if Task.isCancelled {
+            throw CancellationError()
+        }
         return try parseUMLSResponse(data)
     }
 
     // 获取术语详细信息
     func getTermDetails(cui: String) async throws -> MedicalTermDetails {
         // CUI = Concept Unique Identifier
-        let apiKey = "YOUR_UMLS_API_KEY"
-        let urlString = "https://uts-ws.nlm.nih.gov/rest/content/current/CUI/\(cui)?apiKey=\(apiKey)"
+        guard let apiKey = umlsAPIKey() else {
+            throw DictionaryError.missingAPIKey
+        }
+
+        let urlString = "\(umlsBaseURL)/content/current/CUI/\(cui)?apiKey=\(apiKey)"
 
         guard let url = URL(string: urlString) else {
             throw DictionaryError.invalidURL
         }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await session.data(from: url)
+        if Task.isCancelled {
+            throw CancellationError()
+        }
         return try parseTermDetails(data)
+    }
+
+    /// 直接从UMLS获取并转换为本地MedicalTerm（只取首条结果）
+    func fetchMedicalTerm(query: String) async throws -> MedicalTerm? {
+        let searchResults = try await searchMedicalTerm(query: query)
+        guard let first = searchResults.first else { return nil }
+
+        let details = try await getTermDetails(cui: first.cui)
+
+        // UMLS不提供发音/例句，这里填充占位信息
+        return MedicalTerm(
+            term: details.name,
+            pronunciation: details.name, // 占位
+            definition: details.definition.isEmpty ? "Definition not available from UMLS." : details.definition,
+            chineseTranslation: details.name, // 需要上层另行翻译
+            etymology: details.semanticTypes.first,
+            example: nil,
+            category: .general,
+            difficulty: .intermediate,
+            relatedTerms: details.synonyms
+        )
+    }
+
+    private func umlsAPIKey() -> String? {
+        // Allow configuration via environment variable or UserDefaults
+        if let envKey = ProcessInfo.processInfo.environment["UMLS_API_KEY"], !envKey.isEmpty {
+            return envKey
+        }
+        if let storedKey = UserDefaults.standard.string(forKey: umlsKeyDefaultsKey), !storedKey.isEmpty {
+            return storedKey
+        }
+        return nil
+    }
+
+    func saveAPIKey(_ key: String) {
+        UserDefaults.standard.set(key, forKey: umlsKeyDefaultsKey)
+    }
+
+    func clearAPIKey() {
+        UserDefaults.standard.removeObject(forKey: umlsKeyDefaultsKey)
+    }
+
+    func currentAPIKey() -> String? {
+        umlsAPIKey()
     }
 
     // 加载预制的医学词汇库（500+术语）
@@ -863,14 +927,52 @@ class MedicalDictionaryService: ObservableObject {
     }
 
     private func parseUMLSResponse(_ data: Data) throws -> [MedicalTermSearchResult] {
-        // 解析UMLS API响应
-        // 实际实现需要根据UMLS API文档
-        return []
+        // 容错解析：只需CUI和name即可
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let result = root["result"] as? [String: Any],
+            let results = result["results"] as? [[String: Any]]
+        else {
+            return []
+        }
+
+        return results.compactMap { item in
+            guard
+                let cui = item["ui"] as? String, cui != "NONE",
+                let name = item["name"] as? String
+            else { return nil }
+
+            return MedicalTermSearchResult(
+                cui: cui,
+                name: name,
+                rootSource: item["rootSource"] as? String ?? ""
+            )
+        }
     }
 
     private func parseTermDetails(_ data: Data) throws -> MedicalTermDetails {
-        // 解析术语详细信息
-        throw DictionaryError.notImplemented
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let result = root["result"] as? [String: Any]
+        else {
+            throw DictionaryError.parseError
+        }
+
+        let name = (result["name"] as? String) ?? "Unknown"
+        let definitionsArray = result["definitions"] as? [[String: Any]] ?? []
+        let definition = definitionsArray.first?["value"] as? String ?? ""
+
+        let synonyms = (result["synonyms"] as? [String]) ?? []
+        let semanticTypes = (result["semanticTypes"] as? [[String: Any]] ?? [])
+            .compactMap { $0["name"] as? String }
+
+        return MedicalTermDetails(
+            cui: (result["ui"] as? String) ?? "",
+            name: name,
+            definition: definition,
+            synonyms: synonyms,
+            semanticTypes: semanticTypes
+        )
     }
 }
 
@@ -894,6 +996,7 @@ enum DictionaryError: Error, LocalizedError {
     case notImplemented
     case networkError
     case parseError
+    case missingAPIKey
 
     var errorDescription: String? {
         switch self {
@@ -901,6 +1004,7 @@ enum DictionaryError: Error, LocalizedError {
         case .notImplemented: return "Feature not yet implemented"
         case .networkError: return "Network error occurred"
         case .parseError: return "Failed to parse response"
+        case .missingAPIKey: return "UMLS API key is missing. Please configure it before searching."
         }
     }
 }

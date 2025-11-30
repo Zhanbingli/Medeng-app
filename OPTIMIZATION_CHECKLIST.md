@@ -10,6 +10,8 @@
   - [x] 添加 `favoriteTerms` 缓存
   - [x] 实施智能缓存失效机制
   - [x] 优化索引构建逻辑
+  - [x] 为 `termsToReview` 增加TTL与跨天失效，避免复习提醒过期不刷新
+  - [x] 持久化改为后台队列执行，避免主线程卡顿
 
 - [x] **FlashcardView渲染优化**
   - [x] 将 `termsToStudy` 改为 @State 缓存
@@ -17,12 +19,14 @@
   - [x] 提取性能常量(baseScale, scaleDecrement等)
   - [x] 优化滑动检测阈值(5pt)
   - [x] 减少微小移动触发的重渲染
+  - [x] 监听进度/词库变更时重建卡组，自动校正索引避免卡片耗尽后卡死
 
 - [x] **StudyProgressView计算优化**
   - [x] 添加 `cachedStatistics` 统计缓存
   - [x] 添加 `cachedCategoryData` 类别数据缓存
   - [x] 实施视图出现时缓存刷新策略
   - [x] 使用 compactMap 替代 map + filter
+  - [x] 改为实时监听进度/词库变更，移除本地缓存状态，确保统计即时刷新
 
 ### 💾 内存管理
 
@@ -30,6 +34,7 @@
   - [x] @State vs @StateObject 正确使用
   - [x] 缓存及时失效机制
   - [x] 避免循环引用
+  - [x] 为AI/词典网络请求配置短超时与可取消Session，避免悬挂请求占用资源
 
 ### 📐 代码质量
 
@@ -64,6 +69,7 @@
 - [ ] 搜索防抖(debounce 300ms)
 - [ ] 虚拟列表实现(术语>500时)
 - [ ] 暗黑模式性能优化
+- [ ] 词典/AI密钥设置入口（替代占位符），并持久化到安全存储
 
 ### 中期优化
 - [ ] 后台数据预加载

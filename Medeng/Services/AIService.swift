@@ -34,6 +34,7 @@ enum AIProvider: String, CaseIterable {
     }
 }
 
+@MainActor
 class AIService: ObservableObject {
     static let shared = AIService()
 

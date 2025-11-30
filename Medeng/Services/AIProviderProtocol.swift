@@ -26,6 +26,12 @@ protocol AIProviderProtocol {
 class BaseAIProvider: AIProviderProtocol {
     let provider: AIProvider
     var apiKey: String
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
 
     init(provider: AIProvider, apiKey: String) {
         self.provider = provider
@@ -33,13 +39,18 @@ class BaseAIProvider: AIProviderProtocol {
     }
 
     func call(prompt: String) async throws -> AIAnalysisResult {
-        let request = try buildRequest(
+        var request = try buildRequest(
             prompt: prompt,
             baseURL: provider.baseURL,
             model: provider.defaultModel
         )
+        request.timeoutInterval = 20
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
+
+        if Task.isCancelled {
+            throw CancellationError()
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIError.networkError(underlying: URLError(.badServerResponse))

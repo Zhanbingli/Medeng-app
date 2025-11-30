@@ -9,16 +9,21 @@ import SwiftUI
 
 struct AISettingsView: View {
     @StateObject private var aiService = AIService.shared
+    private let dictionaryService = MedicalDictionaryService.shared
     @Environment(\.dismiss) var dismiss
 
     @State private var selectedProvider: AIProvider
     @State private var apiKeyInput: String
+    @State private var umlsKeyInput: String
     @State private var showingSaveAlert = false
+    @State private var showingDictionarySaveAlert = false
 
     init() {
         let service = AIService.shared
         _selectedProvider = State(initialValue: service.currentProvider)
         _apiKeyInput = State(initialValue: service.apiKey)
+        let dictKey = MedicalDictionaryService.shared.currentAPIKey() ?? ""
+        _umlsKeyInput = State(initialValue: dictKey)
     }
 
     var body: some View {
@@ -103,6 +108,39 @@ struct AISettingsView: View {
                         .foregroundColor(.blue)
                     }
                 }
+
+                Section("Medical Dictionary (UMLS)") {
+                    Text("用于从 UMLS 获取医学术语、定义与同义词，需要有效的 UMLS API Key。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    SecureField("Enter UMLS API Key", text: $umlsKeyInput)
+                        .textContentType(.password)
+                        .autocapitalization(.none)
+                        .font(.system(.body, design: .monospaced))
+
+                    Link("申请 UMLS License / API Key",
+                         destination: URL(string: "https://uts.nlm.nih.gov/uts/login")!)
+                        .font(.caption)
+
+                    Button(action: saveDictionaryKey) {
+                        HStack {
+                            Image(systemName: "checkmark.seal.fill")
+                            Text("Save UMLS Key")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .foregroundColor(.white)
+                    }
+                    .listRowBackground(umlsKeyInput.isEmpty ? Color.gray.opacity(0.4) : Color.green)
+                    .disabled(umlsKeyInput.isEmpty)
+
+                    if !(dictionaryService.currentAPIKey() ?? "").isEmpty {
+                        Button("Clear UMLS Key", role: .destructive) {
+                            umlsKeyInput = ""
+                            dictionaryService.clearAPIKey()
+                        }
+                    }
+                }
             }
             .navigationTitle("AI Configuration")
             .navigationBarTitleDisplayMode(.inline)
@@ -119,6 +157,11 @@ struct AISettingsView: View {
                 }
             } message: {
                 Text("Your AI service is configured and ready to use!")
+            }
+            .alert("UMLS Key Saved", isPresented: $showingDictionarySaveAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Medical dictionary lookups are now enabled.")
             }
         }
     }
@@ -139,6 +182,11 @@ struct AISettingsView: View {
     func saveConfiguration() {
         aiService.saveConfiguration(provider: selectedProvider, apiKey: apiKeyInput)
         showingSaveAlert = true
+    }
+
+    func saveDictionaryKey() {
+        dictionaryService.saveAPIKey(umlsKeyInput.trimmingCharacters(in: .whitespacesAndNewlines))
+        showingDictionarySaveAlert = true
     }
 }
 
