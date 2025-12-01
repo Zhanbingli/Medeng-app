@@ -12,6 +12,7 @@ struct TermDetailView: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
     @Environment(\.dismiss) var dismiss
     @State private var showingAIInsights = false
+    @StateObject private var aiService = AIService.shared
 
     var progress: StudyProgress {
         vocabularyManager.getProgress(for: term)
@@ -21,31 +22,8 @@ struct TermDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // 标题和发音
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(term.term)
-                                .font(.largeTitle)
-                                .bold()
-
-                            Spacer()
-
-                            Button(action: {
-                                vocabularyManager.toggleFavorite(for: term)
-                            }) {
-                                Image(systemName: progress.isFavorite ? "star.fill" : "star")
-                                    .foregroundColor(progress.isFavorite ? .yellow : .gray)
-                                    .font(.title2)
-                            }
-                        }
-
-                        Text(term.pronunciation)
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-
-                        Text(term.chineseTranslation)
-                            .font(.title2)
-                            .foregroundColor(.blue)
+                    TermHeaderCard(term: term, progress: progress) {
+                        vocabularyManager.toggleFavorite(for: term)
                     }
 
                     // AI智能分析按钮
@@ -56,7 +34,7 @@ struct TermDetailView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("AI Insights")
                                     .font(.headline)
-                                Text("Get smart breakdown and tips")
+                                Text(aiService.isConfigured ? "Get smart breakdown and tips" : "Connect an AI key in Settings")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -75,6 +53,7 @@ struct TermDetailView: View {
                         )
                         .cornerRadius(12)
                     }
+                    .disabled(!aiService.isConfigured)
                     .buttonStyle(PlainButtonStyle())
 
                     Divider()
@@ -146,20 +125,20 @@ struct TermDetailView: View {
                     // 分类信息
                     Divider()
 
-                    HStack(spacing: 20) {
-                        VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 28) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Text("Category")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            HStack {
+                            HStack(spacing: 10) {
                                 CategoryIcon(category: term.category)
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: 28, height: 28)
                                 Text(term.category.rawValue)
                                     .font(.subheadline)
                             }
                         }
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Text("Difficulty")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -475,4 +454,81 @@ struct StatBox: View {
         relatedTerms: ["Hypotension", "Blood Pressure"]
     ))
     .environmentObject(VocabularyManager.shared)
+}
+
+// MARK: - Header Card
+
+struct TermHeaderCard: View {
+    let term: MedicalTerm
+    let progress: StudyProgress
+    let onToggleFavorite: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                CategoryIcon(category: term.category)
+                    .frame(width: 56, height: 56)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(term.term)
+                        .font(.largeTitle)
+                        .bold()
+                        .lineLimit(2)
+
+                    Text(term.pronunciation)
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                        .italic()
+
+                    HStack(spacing: 8) {
+                        DifficultyBadge(difficulty: term.difficulty)
+                        if progress.reviewCount > 0 {
+                            MasteryBadge(level: progress.masteryLevel)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 12) {
+                    Button(action: onToggleFavorite) {
+                        Image(systemName: progress.isFavorite ? "star.fill" : "star")
+                            .font(.title2)
+                            .foregroundColor(progress.isFavorite ? .yellow : .gray)
+                    }
+
+                    SmallPronunciationButton(term: term)
+                }
+            }
+
+            Text(term.chineseTranslation)
+                .font(.title2)
+                .foregroundColor(.primary)
+
+            if progress.reviewCount > 0 {
+                HStack(spacing: 12) {
+                    StatPill(icon: "arrow.clockwise", value: "\(progress.reviewCount)", label: "Reviews", color: .primary.opacity(0.9))
+                    StatPill(icon: "checkmark.circle.fill", value: "\(Int(progress.accuracy * 100))%", label: "Accuracy", color: .primary.opacity(0.9))
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue.opacity(0.25), .purple.opacity(0.25)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+            }
+        )
+        .cornerRadius(20)
+        .shadow(color: .blue.opacity(0.2), radius: 12, y: 8)
+    }
 }

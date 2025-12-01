@@ -13,6 +13,25 @@ struct VocabularyListView: View {
     @State private var selectedTerm: MedicalTerm?
     @State private var viewMode: ViewMode = .card
     @State private var sortMode: SortMode = .alphabetical
+    @State private var showingImporter = false
+    @State private var importQuery = ""
+    @State private var isImporting = false
+    @State private var importError: String?
+    @State private var importResult: MedicalTerm?
+    @State private var importSuccess = false
+    @State private var showFavoritesOnly = false
+    @State private var showDueOnly = false
+    @State private var showingAISettings = false
+    @State private var showingCustomAdder = false
+    @State private var customTermInput = ""
+    @State private var customPronunciationInput = ""
+    @State private var customTranslationInput = ""
+    @State private var customDefinitionInput = ""
+    @State private var customExampleInput = ""
+    @State private var customEtymologyInput = ""
+    @State private var customCategory: MedicalCategory = .general
+    @State private var customDifficulty: DifficultyLevel = .beginner
+    @State private var customError: String?
 
     enum ViewMode {
         case card, list
@@ -27,19 +46,30 @@ struct VocabularyListView: View {
 
     // 分组后的术语
     var groupedTerms: [(key: String, terms: [MedicalTerm])] {
+        var baseTerms = vocabularyManager.filteredTerms
+
+        if showFavoritesOnly {
+            baseTerms = baseTerms.filter { vocabularyManager.progressMap[$0.id]?.isFavorite ?? false }
+        }
+
+        if showDueOnly {
+            let dueSet = Set(vocabularyManager.termsToReview.map { $0.id })
+            baseTerms = baseTerms.filter { dueSet.contains($0.id) }
+        }
+
         let sorted: [MedicalTerm]
 
         switch sortMode {
         case .alphabetical:
-            sorted = vocabularyManager.filteredTerms.sorted { $0.term < $1.term }
+            sorted = baseTerms.sorted { $0.term < $1.term }
         case .category:
-            sorted = vocabularyManager.filteredTerms.sorted { $0.category.rawValue < $1.category.rawValue }
+            sorted = baseTerms.sorted { $0.category.rawValue < $1.category.rawValue }
         case .difficulty:
-            sorted = vocabularyManager.filteredTerms.sorted {
+            sorted = baseTerms.sorted {
                 ($0.difficulty.rawValue, $0.term) < ($1.difficulty.rawValue, $1.term)
             }
         case .recent:
-            sorted = vocabularyManager.filteredTerms.sorted { term1, term2 in
+            sorted = baseTerms.sorted { term1, term2 in
                 let date1 = vocabularyManager.progressMap[term1.id]?.lastReviewDate ?? Date.distantPast
                 let date2 = vocabularyManager.progressMap[term2.id]?.lastReviewDate ?? Date.distantPast
                 return date1 > date2
@@ -63,110 +93,279 @@ struct VocabularyListView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 搜索栏
-                ModernSearchBar(text: $vocabularyManager.searchText)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+            contentView
+        }
+    }
 
-                // 工具栏
-                HStack(spacing: 12) {
-                    // 排序模式
-                    Menu {
-                        ForEach(SortMode.allCases, id: \.self) { mode in
-                            Button(action: { sortMode = mode }) {
-                                Label(mode.rawValue, systemImage: sortMode == mode ? "checkmark" : "")
-                            }
-                        }
+    @ViewBuilder
+    private var contentView: some View {
+        VStack(spacing: 0) {
+            headerControls
+            listContent
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Medical Vocabulary")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 16) {
+                    Button {
+                        showingAISettings = true
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.arrow.down")
-                            Text(sortMode.rawValue)
-                                .font(.subheadline)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
+                        Image(systemName: "gearshape")
                     }
 
-                    // 过滤器
-                    ModernFilterButton(
-                        hasActiveFilters: vocabularyManager.selectedCategory != nil || vocabularyManager.selectedDifficulty != nil
-                    ) {
-                        showingFilters = true
+                    Button {
+                        showingCustomAdder = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
 
-                    Spacer()
-
-                    // 视图切换
-                    Button(action: { viewMode = viewMode == .card ? .list : .card }) {
-                        Image(systemName: viewMode == .card ? "list.bullet" : "square.grid.2x2")
-                            .font(.title3)
-                            .foregroundColor(.blue)
+                    Button {
+                        showingImporter = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-
-                // 术语列表
-                if vocabularyManager.filteredTerms.isEmpty {
-                    EmptyStateView()
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
-                                ForEach(groupedTerms, id: \.key) { section in
-                                    Section {
-                                        if viewMode == .card {
-                                            LazyVStack(spacing: 12) {
-                                                ForEach(section.terms) { term in
-                                                    ModernVocabularyCard(term: term)
-                                                        .onTapGesture {
-                                                            selectedTerm = term
-                                                        }
-                                                }
-                                            }
-                                            .padding(.horizontal)
-                                        } else {
-                                            LazyVStack(spacing: 0) {
-                                                ForEach(section.terms) { term in
-                                                    ModernVocabularyRow(term: term)
-                                                        .onTapGesture {
-                                                            selectedTerm = term
-                                                        }
-                                                }
-                                            }
-                                        }
-                                    } header: {
-                                        SectionHeader(title: section.key)
-                                    }
-                                }
-                            }
-                            .padding(.vertical)
-                        }
-                    }
-                }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Medical Vocabulary")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Text("\(vocabularyManager.filteredTerms.count)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .sheet(isPresented: $showingFilters) {
-                FilterView()
-            }
-            .sheet(item: $selectedTerm) { term in
-                TermDetailView(term: term)
             }
         }
+        .sheet(isPresented: $showingFilters) {
+            FilterView()
+        }
+        .sheet(item: $selectedTerm) { term in
+            TermDetailView(term: term)
+        }
+        .sheet(isPresented: $showingImporter) {
+            ImportTermSheet(
+                query: $importQuery,
+                isImporting: $isImporting,
+                error: $importError,
+                result: $importResult,
+                success: $importSuccess,
+                onImport: importTerm
+            )
+        }
+        .sheet(isPresented: $showingCustomAdder) {
+            AddCustomTermSheet(
+                term: $customTermInput,
+                pronunciation: $customPronunciationInput,
+                translation: $customTranslationInput,
+                definition: $customDefinitionInput,
+                example: $customExampleInput,
+                etymology: $customEtymologyInput,
+                category: $customCategory,
+                difficulty: $customDifficulty,
+                error: $customError,
+                onGenerate: simulateAIGeneration,
+                onSave: saveCustomTerm,
+                onReset: resetCustomInputs
+            )
+        }
+        .sheet(isPresented: $showingAISettings) {
+            AISettingsView()
+        }
+    }
+
+    @ViewBuilder
+    private var headerControls: some View {
+        // 搜索栏
+        ModernSearchBar(text: $vocabularyManager.searchText)
+            .padding(.horizontal)
+            .padding(.top, 8)
+
+        QuickScopeChips(
+            showFavoritesOnly: $showFavoritesOnly,
+            showDueOnly: $showDueOnly,
+            clearFilters: clearFilters
+        )
+        .padding(.horizontal)
+        .padding(.bottom, 4)
+
+        // 工具栏
+        HStack(spacing: 12) {
+            // 排序模式
+            Menu {
+                ForEach(SortMode.allCases, id: \.self) { mode in
+                    Button(action: { sortMode = mode }) {
+                        Label(mode.rawValue, systemImage: sortMode == mode ? "checkmark" : "")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.arrow.down")
+                    Text(sortMode.rawValue)
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+            }
+
+            // 过滤器
+            ModernFilterButton(
+                hasActiveFilters: vocabularyManager.selectedCategory != nil || vocabularyManager.selectedDifficulty != nil
+            ) {
+                showingFilters = true
+            }
+
+            Spacer()
+
+            // 视图切换
+            Button(action: { viewMode = viewMode == .card ? .list : .card }) {
+                Image(systemName: viewMode == .card ? "list.bullet" : "square.grid.2x2")
+                    .font(.title3)
+                    .foregroundColor(.blue)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        // 术语列表
+        if groupedTerms.flatMap(\.terms).isEmpty {
+            EmptyStateView()
+        } else {
+            ScrollViewReader { _ in
+                ScrollView {
+                    LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
+                        ForEach(groupedTerms, id: \.key) { section in
+                            Section {
+                                if viewMode == .card {
+                                    LazyVStack(spacing: 12) {
+                                        ForEach(section.terms) { term in
+                                            ModernVocabularyCard(term: term)
+                                                .onTapGesture {
+                                                    selectedTerm = term
+                                                }
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                } else {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(section.terms) { term in
+                                            ModernVocabularyRow(term: term)
+                                                .onTapGesture {
+                                                    selectedTerm = term
+                                                }
+                                        }
+                                    }
+                                }
+                            } header: {
+                                SectionHeader(title: section.key)
+                            }
+                        }
+                    }
+                    .padding(.vertical)
+                }
+            }
+        }
+    }
+
+    private func importTerm() {
+        guard !importQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        importError = nil
+        isImporting = true
+        importSuccess = false
+
+        Task {
+            do {
+                if let term = try await MedicalDictionaryService.shared.fetchMedicalTerm(query: importQuery) {
+                    await MainActor.run {
+                        // Avoid duplicates by term name
+                        if !vocabularyManager.allTerms.contains(where: { $0.term.caseInsensitiveCompare(term.term) == .orderedSame }) {
+                            vocabularyManager.addCustomTerm(term)
+                            importSuccess = true
+                            importResult = term
+                        } else {
+                            importError = "\"\(term.term)\" already exists."
+                            importResult = term
+                        }
+                    }
+                } else {
+                    await MainActor.run {
+                        importError = "No result found for \"\(importQuery)\""
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    importError = error.localizedDescription
+                }
+            }
+            await MainActor.run {
+                isImporting = false
+            }
+        }
+    }
+
+    private func simulateAIGeneration() {
+        let term = customTermInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else {
+            customError = "Please enter a term first."
+            return
+        }
+        customError = nil
+        let short = term.prefix(40)
+        if customDefinitionInput.isEmpty {
+            customDefinitionInput = "\(short) is a medical term. This concise definition keeps the card readable."
+        }
+        if customExampleInput.isEmpty {
+            customExampleInput = "Example: The patient presented with \(short.lowercased())."
+        }
+        if customEtymologyInput.isEmpty {
+            customEtymologyInput = "Etymology: \(short)."
+        }
+    }
+
+    private func saveCustomTerm() {
+        let term = customTermInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let translation = customTranslationInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let definition = customDefinitionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !term.isEmpty else { customError = "Term is required."; return }
+        guard !translation.isEmpty else { customError = "Translation is required."; return }
+        guard !definition.isEmpty else { customError = "Definition is required."; return }
+
+        let newTerm = MedicalTerm(
+            term: term,
+            pronunciation: customPronunciationInput.isEmpty ? term : customPronunciationInput,
+            definition: String(definition.prefix(200)),
+            chineseTranslation: translation,
+            etymology: customEtymologyInput.isEmpty ? nil : String(customEtymologyInput.prefix(140)),
+            example: customExampleInput.isEmpty ? nil : String(customExampleInput.prefix(160)),
+            category: customCategory,
+            difficulty: customDifficulty
+        )
+
+        if !vocabularyManager.allTerms.contains(where: { $0.term.caseInsensitiveCompare(newTerm.term) == .orderedSame }) {
+            vocabularyManager.addCustomTerm(newTerm)
+            resetCustomInputs()
+            showingCustomAdder = false
+        } else {
+            customError = "\"\(newTerm.term)\" already exists."
+        }
+    }
+
+    private func resetCustomInputs() {
+        customTermInput = ""
+        customPronunciationInput = ""
+        customTranslationInput = ""
+        customDefinitionInput = ""
+        customExampleInput = ""
+        customEtymologyInput = ""
+        customCategory = .general
+        customDifficulty = .beginner
+        customError = nil
+    }
+
+    private func clearFilters() {
+        showFavoritesOnly = false
+        showDueOnly = false
+        vocabularyManager.selectedCategory = nil
+        vocabularyManager.selectedDifficulty = nil
+        vocabularyManager.searchText = ""
     }
 }
 
@@ -420,4 +619,232 @@ struct ModernVocabularyRow: View {
 #Preview {
     VocabularyListView()
         .environmentObject(VocabularyManager.shared)
+}
+
+// 快速筛选 chips
+struct QuickScopeChips: View {
+    @Binding var showFavoritesOnly: Bool
+    @Binding var showDueOnly: Bool
+    let clearFilters: () -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                FilterChip(title: "All", isActive: !showFavoritesOnly && !showDueOnly, color: .blue) {
+                    showFavoritesOnly = false
+                    showDueOnly = false
+                }
+                FilterChip(title: "Favorites", isActive: showFavoritesOnly, color: .orange) {
+                    showFavoritesOnly.toggle()
+                    if showFavoritesOnly { showDueOnly = false }
+                }
+                FilterChip(title: "Due", isActive: showDueOnly, color: .red) {
+                    showDueOnly.toggle()
+                    if showDueOnly { showFavoritesOnly = false }
+                }
+                Button(action: clearFilters) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("Reset")
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+}
+
+struct FilterChip: View {
+    let title: String
+    let isActive: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if isActive {
+                    Image(systemName: "checkmark")
+                }
+                Text(title)
+            }
+            .font(.caption)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isActive ? color.opacity(0.15) : Color(.systemGray6))
+            .foregroundColor(isActive ? color : .primary)
+            .cornerRadius(12)
+        }
+    }
+}
+
+// 自定义术语添加弹窗
+struct AddCustomTermSheet: View {
+    @Binding var term: String
+    @Binding var pronunciation: String
+    @Binding var translation: String
+    @Binding var definition: String
+    @Binding var example: String
+    @Binding var etymology: String
+    @Binding var category: MedicalCategory
+    @Binding var difficulty: DifficultyLevel
+    @Binding var error: String?
+    let onGenerate: () -> Void
+    let onSave: () -> Void
+    let onReset: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Basic Info") {
+                    TextField("Term (required)", text: $term)
+                        .autocapitalization(.none)
+                    TextField("Pronunciation", text: $pronunciation)
+                        .autocapitalization(.none)
+                    TextField("Translation (required)", text: $translation)
+                }
+
+                Section("Details") {
+                    TextField("Definition (required)", text: $definition, axis: .vertical)
+                        .lineLimit(2...4)
+                    TextField("Example", text: $example, axis: .vertical)
+                        .lineLimit(1...3)
+                    TextField("Etymology", text: $etymology, axis: .vertical)
+                        .lineLimit(1...2)
+                }
+
+                Section("Meta") {
+                    Picker("Category", selection: $category) {
+                        ForEach(MedicalCategory.allCases, id: \.self) { cat in
+                            Text(cat.rawValue).tag(cat)
+                        }
+                    }
+
+                    Picker("Difficulty", selection: $difficulty) {
+                        Text(DifficultyLevel.beginner.rawValue).tag(DifficultyLevel.beginner)
+                        Text(DifficultyLevel.intermediate.rawValue).tag(DifficultyLevel.intermediate)
+                        Text(DifficultyLevel.advanced.rawValue).tag(DifficultyLevel.advanced)
+                    }
+                }
+
+                if let error = error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+
+                Section {
+                    Button {
+                        onGenerate()
+                    } label: {
+                        Label("Auto-fill (concise)", systemImage: "wand.and.stars")
+                    }
+                    .disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        onSave()
+                    } label: {
+                        Label("Save Term", systemImage: "checkmark.circle.fill")
+                    }
+                }
+            }
+            .navigationTitle("Add Medical Term")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        onReset()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 术语导入弹窗
+struct ImportTermSheet: View {
+    @Binding var query: String
+    @Binding var isImporting: Bool
+    @Binding var error: String?
+    @Binding var result: MedicalTerm?
+    @Binding var success: Bool
+    let onImport: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    private var hasKey: Bool {
+        !(MedicalDictionaryService.shared.currentAPIKey() ?? "").isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("UMLS Search") {
+                    TextField("Enter medical term", text: $query)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+
+                    if isImporting {
+                        ProgressView("Searching…")
+                    }
+
+                    if let result = result {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(result.term).font(.headline)
+                            Text(result.definition).font(.caption).foregroundColor(.secondary).lineLimit(3)
+                        }
+                    }
+
+                    if success {
+                        Label("Added to vocabulary", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.subheadline)
+                    }
+
+                    if !hasKey {
+                        Label("Add your UMLS API key in Settings to enable online search.", systemImage: "key.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else if let error = error {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                }
+
+                Section {
+                    Button {
+                        onImport()
+                    } label: {
+                        HStack {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Import Term")
+                        }
+                    }
+                    .disabled(isImporting || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !hasKey)
+                }
+            }
+            .navigationTitle("Add Vocabulary")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        query = ""
+                        error = nil
+                        result = nil
+                        success = false
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
 }

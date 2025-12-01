@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct FlashcardView: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
@@ -19,6 +20,9 @@ struct FlashcardView: View {
         case dueOnly     // Only due terms
         case all         // All terms
     }
+
+    private let hapticImpact = UIImpactFeedbackGenerator(style: .medium)
+    private let hapticLight = UIImpactFeedbackGenerator(style: .light)
 
     private func refreshTermsToStudy(resetIndex: Bool) {
         let dueTerms = vocabularyManager.termsToReview
@@ -67,61 +71,76 @@ struct FlashcardView: View {
 
                             Spacer().frame(height: 20)
 
-                            // 卡片堆叠区域
-                            ZStack {
-                                // 后面的卡片（预览效果）
-                                ForEach(Array(termsToStudy.enumerated()), id: \.element.id) { index, term in
-                                    if index >= currentIndex && index < currentIndex + 3 {
-                                        SwipeableFlashcard(
-                                            term: term,
-                                            index: index - currentIndex,
-                                            onSwipeLeft: {
-                                                handleReview(for: term, isCorrect: false)
-                                            },
-                                            onSwipeRight: {
-                                                handleReview(for: term, isCorrect: true)
-                                            }
-                                        )
-                                        .environmentObject(vocabularyManager)
-                                        .zIndex(Double(termsToStudy.count - index))
-                                    }
+                // 卡片堆叠区域
+                ZStack {
+                    // 后面的卡片（预览效果）
+                    ForEach(Array(termsToStudy.enumerated()), id: \.element.id) { index, term in
+                        if index >= currentIndex && index < currentIndex + 3 {
+                            SwipeableFlashcard(
+                                term: term,
+                                index: index - currentIndex,
+                                onSwipeLeft: {
+                                    handleReview(for: term, isCorrect: false)
+                                },
+                                onSwipeRight: {
+                                    handleReview(for: term, isCorrect: true)
                                 }
-                            }
+                            )
+                            .environmentObject(vocabularyManager)
+                            .zIndex(Double(termsToStudy.count - index))
+                        }
+                    }
+                }
                             .frame(height: geometry.size.height * 0.6)
                             .padding(.horizontal, 20)
 
                             Spacer()
 
-                            // 底部提示
-                            HStack(spacing: 40) {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "arrow.left")
-                                        .font(.title2)
-                                        .foregroundColor(.red)
-                                    Text("Again")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
+                            // 底部提示与操作
+                            if let currentTerm = termsToStudy[safe: currentIndex] {
+                                HStack(spacing: 32) {
+                                    Button {
+                                        triggerReview(for: currentTerm, isCorrect: false)
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: "arrow.left")
+                                                .font(.title2)
+                                                .foregroundColor(.red)
+                                            Text("Again")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
 
-                                VStack(spacing: 8) {
-                                    Image(systemName: "hand.tap.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.blue)
-                                    Text("Flip Card")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
+                                    Button {
+                                        NotificationCenter.default.post(name: .flashcardFlip, object: nil)
+                                        hapticLight.impactOccurred()
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: "hand.tap.fill")
+                                                .font(.title2)
+                                                .foregroundColor(.blue)
+                                            Text("Flip Card")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
 
-                                VStack(spacing: 8) {
-                                    Image(systemName: "arrow.right")
-                                        .font(.title2)
-                                        .foregroundColor(.green)
-                                    Text("Good")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
+                                    Button {
+                                        triggerReview(for: currentTerm, isCorrect: true)
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: "arrow.right")
+                                                .font(.title2)
+                                                .foregroundColor(.green)
+                                            Text("Good")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
                                 }
+                                .padding(.bottom, 40)
                             }
-                            .padding(.bottom, 40)
                         }
                     }
                 }
@@ -175,6 +194,11 @@ struct FlashcardView: View {
                 currentIndex += 1
             }
         }
+    }
+
+    private func triggerReview(for term: MedicalTerm, isCorrect: Bool) {
+        hapticImpact.impactOccurred()
+        handleReview(for: term, isCorrect: isCorrect)
     }
 }
 
@@ -350,6 +374,13 @@ struct SwipeableFlashcard: View {
         .offset(x: index == 0 ? offset.width : 0, y: index == 0 ? offset.height : 0)
         .rotationEffect(.degrees(index == 0 ? rotation : 0))
         .opacity(index < 2 ? 1.0 : 0.5)
+        .onReceive(NotificationCenter.default.publisher(for: .flashcardFlip)) { _ in
+            if index == 0 {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    isShowingAnswer.toggle()
+                }
+            }
+        }
         .gesture(
             index == 0 ? DragGesture()
                 .onChanged { gesture in
@@ -614,6 +645,16 @@ struct SwipeIndicator: View {
         .background(color.opacity(0.1))
         .cornerRadius(16)
     }
+}
+
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
+extension Notification.Name {
+    static let flashcardFlip = Notification.Name("flashcardFlip")
 }
 
 // 空状态视图

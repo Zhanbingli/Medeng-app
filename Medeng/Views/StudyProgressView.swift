@@ -287,6 +287,7 @@ struct ProgressRingSection: View {
 struct CategoryBreakdownSection: View {
     @EnvironmentObject var vocabularyManager: VocabularyManager
     @State private var cachedCategoryData: [(category: MedicalCategory, count: Int, studied: Int)]?
+    @State private var isExpanded: Bool = true
 
     var categoryData: [(category: MedicalCategory, count: Int, studied: Int)] {
         if let cached = cachedCategoryData {
@@ -311,18 +312,28 @@ struct CategoryBreakdownSection: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Category Breakdown")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            ForEach(categoryData, id: \.category) { data in
-                CategoryProgressRow(
-                    category: data.category,
-                    total: data.count,
-                    studied: data.studied
-                )
+        VStack(spacing: 12) {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(spacing: 12) {
+                    ForEach(categoryData, id: \.category) { data in
+                        CategoryProgressRow(
+                            category: data.category,
+                            total: data.count,
+                            studied: data.studied
+                        )
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Text("Category Breakdown")
+                        .font(.headline)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.secondary)
+                }
             }
+            .animation(.spring(response: 0.3), value: isExpanded)
         }
         .padding()
         .background(Color(.systemBackground))
@@ -388,6 +399,28 @@ struct CategoryProgressRow: View {
 
 // 学习打卡记录
 struct StudyStreakSection: View {
+    @EnvironmentObject var vocabularyManager: VocabularyManager
+
+    var streak: Int {
+        vocabularyManager.currentStudyStreak()
+    }
+
+    var weekActivity: [Bool] {
+        vocabularyManager.recentActivity()
+    }
+
+    private var dayLabels: [String] {
+        let today = Calendar.current.startOfDay(for: Date())
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "E" // short weekday
+
+        return (0..<7).reversed().compactMap { offset -> String? in
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return formatter.string(from: day)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             HStack {
@@ -395,7 +428,7 @@ struct StudyStreakSection: View {
                     Text("Study Streak")
                         .font(.headline)
 
-                    Text("Keep up the great work!")
+                    Text(streak > 0 ? "Keep up the great work!" : "Start a session to begin your streak")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -404,11 +437,11 @@ struct StudyStreakSection: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill")
-                        .foregroundColor(.orange)
-                    Text("7 days")
+                        .foregroundColor(streak > 0 ? .orange : .gray)
+                    Text(streak > 0 ? "\(streak) days" : "0")
                         .font(.title3)
                         .bold()
-                        .foregroundColor(.orange)
+                        .foregroundColor(streak > 0 ? .orange : .secondary)
                 }
             }
 
@@ -420,19 +453,21 @@ struct StudyStreakSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 8) {
-                    ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { day in
+                    let labels = dayLabels
+                    ForEach(0..<min(weekActivity.count, labels.count), id: \.self) { idx in
                         VStack(spacing: 4) {
-                            Text(day)
+                            Text(labels[idx])
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
 
                             Circle()
-                                .fill(Color.green.opacity(0.8))
+                                .fill(weekActivity[idx] ? Color.green.opacity(0.85) : Color.gray.opacity(0.2))
                                 .frame(width: 32, height: 32)
                                 .overlay(
-                                    Image(systemName: "checkmark")
+                                    weekActivity[idx] ?
+                                        Image(systemName: "checkmark")
                                         .font(.caption)
-                                        .foregroundColor(.white)
+                                        .foregroundColor(.white) : nil
                                 )
                         }
                     }
@@ -519,7 +554,7 @@ struct RecentActivityRow: View {
                     .bold()
                     .foregroundColor(progress.accuracy > 0.7 ? .green : .orange)
 
-                Text(progress.lastReviewDate, style: .relative)
+                Text(progress.lastReviewDate.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

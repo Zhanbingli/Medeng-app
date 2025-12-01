@@ -231,6 +231,53 @@ class VocabularyManager: ObservableObject {
         return result
     }
 
+    // MARK: - Activity / Streaks
+
+    private func startOfDay(for date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    /// 当前连续打卡天数（基于最近一次复习到今天的连续天）
+    func currentStudyStreak() -> Int {
+        let days = Set(
+            progressMap.values
+                .filter { $0.reviewCount > 0 }
+                .map { startOfDay(for: $0.lastReviewDate) }
+        )
+        guard !days.isEmpty else { return 0 }
+
+        var streak = 0
+        var cursor = startOfDay(for: Date())
+
+        while days.contains(cursor) {
+            streak += 1
+            if let previousDay = Calendar.current.date(byAdding: .day, value: -1, to: cursor) {
+                cursor = previousDay
+            } else {
+                break
+            }
+        }
+        return streak
+    }
+
+    /// 最近7天的活动布尔标记（从周一到周日或从今天回溯6天）
+    func recentActivity(last daysCount: Int = 7) -> [Bool] {
+        let daySet = Set(
+            progressMap.values
+                .filter { $0.reviewCount > 0 }
+                .map { startOfDay(for: $0.lastReviewDate) }
+        )
+        let today = startOfDay(for: Date())
+        var activity: [Bool] = []
+
+        for offset in stride(from: daysCount - 1, through: 0, by: -1) {
+            if let day = Calendar.current.date(byAdding: .day, value: -offset, to: today) {
+                activity.append(daySet.contains(day))
+            }
+        }
+        return activity
+    }
+
     /// Invalidate statistics cache
     private func invalidateStatistics() {
         statisticsInvalidated = true

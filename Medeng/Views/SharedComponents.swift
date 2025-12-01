@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import UIKit
 
 // 类别图标
 struct CategoryIcon: View {
@@ -166,12 +167,12 @@ struct SmallPronunciationButton: View {
 
     var body: some View {
         Button(action: {
-            pronunciationService.speakTerm(term)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            pronunciationService.speakTermWithDefinition(term)
         }) {
-            Image(systemName: pronunciationService.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.circle.fill")
+            Image(systemName: "speaker.wave.2.circle.fill")
                 .font(.title3)
-                .foregroundColor(pronunciationService.isSpeaking ? .blue : .gray)
+                .foregroundColor(.blue)
         }
-        .disabled(pronunciationService.isSpeaking)
     }
 }

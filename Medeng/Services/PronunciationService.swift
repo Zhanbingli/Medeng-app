@@ -32,6 +32,8 @@ class PronunciationService: NSObject, ObservableObject {
         // Stop any ongoing speech
         stop()
 
+        configureAudioSessionIfNeeded()
+
         let utterance = AVSpeechUtterance(string: term)
         utterance.voice = AVSpeechSynthesisVoice(language: language)
         utterance.rate = rate ?? currentRate
@@ -56,6 +58,8 @@ class PronunciationService: NSObject, ObservableObject {
         stop()
 
         let text = "\(term.term). \(term.chineseTranslation). Definition: \(term.definition)"
+        configureAudioSessionIfNeeded()
+
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = currentRate
@@ -86,6 +90,17 @@ class PronunciationService: NSObject, ObservableObject {
     func resume() {
         if synthesizer.isPaused {
             synthesizer.continueSpeaking()
+        }
+    }
+
+    /// Prepare audio session for speech playback
+    private func configureAudioSessionIfNeeded() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .defaultToSpeaker])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            // Fallback silently if audio session cannot be configured
         }
     }
 
